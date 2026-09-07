@@ -1,0 +1,87 @@
+#!/bin/ksh -e
+
+# Update things we install from Cargo or Go
+
+LOCAL_CRATES="
+	aur-rs \
+	img-tool \
+	little-tools \
+	personal-tools \
+	vid-tool \
+	zedfs"
+
+if [[ $(uname -s) == "SunOS" ]]
+then
+	REMOTE_CRATES="
+		du-dust \
+		fclones
+		tombi \
+		tokei \
+		typos-cli \
+	  dprint \
+	"
+
+	GIT_CRATES="
+		tombi-cli=https://github.com/tombi-toml/tombi
+		typos-lsp=https://github.com/tekumara/typos-lsp 
+	"
+
+	GO_PKGS="
+		github.com/charmbracelet/glow/v2@latest \
+		github.com/errata-ai/vale@latest \
+		github.com/junegunn/fzf@latest \
+		github.com/tomnomnom/gron@latest \
+		golang.org/x/tools/gopls@latest \
+	"
+else
+	REMOTE_CRATES="
+		fclones \
+	"
+
+	GO_PKGS="
+		golang.org/x/tools/gopls@latest \
+	"
+fi
+
+for pkg in $GO_PKGS
+do
+	print "INSTALLING GO_PKG: $pkg"
+	go install $pkg >/dev/null
+done
+
+for git_crate in $GIT_CRATES
+do
+	url=${git_crate#*=}
+	crate=${git_crate%=*}
+	print "INSTALLING GIT CRATE: $crate FROM $url"
+	cargo install --git $url --locked $crate
+done
+
+
+for crate in $REMOTE_CRATES
+do
+	print "INSTALLING REMOTE_CRATE: $crate"
+	cargo install -q "$crate"
+done
+
+for crate in $LOCAL_CRATES
+do
+	print "INSTALLING LOCAL CRATE: ${crate}"
+	crate_dir="${HOME}/github.com/snltd/$crate"
+	branch=$(git -C "$crate_dir" branch --show-current)
+
+	if [[ "$branch" != "main" ]]
+	then
+		print -u2 "${crate} is not on main -- SKIPPING"
+		continue
+	fi
+
+	if test -f "${crate_dir}/install.sh"
+	then
+		cd "$crate_dir" || exit 2
+		./install.sh -q
+		cd - || exit 2
+	else
+		cargo install -q --path "$crate_dir"
+	fi
+done

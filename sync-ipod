@@ -1,0 +1,37 @@
+#!/bin/ksh
+
+SOURCE_ROOT="/storage/mp3"
+MOUNT_POINT="/run/media/rob/IPOD"
+DEST_ROOT="${MOUNT_POINT}/mp3"
+
+for dir in \
+	albums \
+	audiobooks \
+	classical \
+	eps \
+	radio_sessions \
+	radio_shows	\
+	spoken_word \
+	tracks
+do
+	rsync \
+		-hvrltD \
+		--modify-window=1 \
+		--stats \
+		--info=progress2 \
+		--delete \
+		--delete-excluded  \
+	${SOURCE_ROOT}/${dir}/ \
+	${DEST_ROOT}/$dir/
+done
+
+(
+	cd "${MOUNT_POINT}/Playlists" || exit 1
+	find ../mp3 -name \*.mp3 | shuf | head -1999 >random_01.m3u
+	find ../mp3 -name \*.mp3 | shuf | head -1999 >random_02.m3u
+	find ../mp3 -name \*.mp3 | shuf | head -1999 >random_03.m3u
+	find ../mp3 -name \*.mp3 | shuf | head -1999 >random_04.m3u
+	find ../mp3 -name \*.mp3 | shuf | head -1999 >random_05.m3u
+)
+
+udisksctl unmount -b /dev/sda2

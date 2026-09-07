@@ -1,0 +1,56 @@
+#!/bin/ksh
+
+MP3_DIR="/storage/mp3"
+STICK="/run/media/rob/USB STICK"
+
+if ! test -d "$STICK"
+then
+  print -u2 "USB stick is not mounted"
+  exit 1
+fi
+
+cd "${STICK}/eps" || exit
+
+find . -mindepth 2 -maxdepth 3 -type d | while read -r dir
+do
+  print $dir
+  rsync \
+    --size-only \
+    --no-perms \
+    --no-owner \
+    --no-group \
+    --delete \
+    -av \
+    "${MP3_DIR}/eps/${dir}/" \
+    "${STICK}/eps/${dir}"
+done
+
+cd "${STICK}/albums" || exit
+
+find . -mindepth 2 -maxdepth 3 -type d | while read -r dir
+do
+  mp3_dir="${MP3_DIR}/albums/${dir}/"
+  stick_dir="${STICK}/albums/${dir}"
+  print "syncing ${mp3_dir} to ${stick_dir}"
+  rsync \
+    --size-only \
+    --no-perms \
+    --no-owner \
+    --no-group \
+    --delete \
+    -av \
+    "$mp3_dir" \
+    "$stick_dir"
+done
+
+cd "${STICK}" || exit
+
+rsync \
+  --size-only \
+  --no-perms \
+  --no-owner \
+  --no-group \
+  --delete \
+  -av \
+  "${MP3_DIR}/tracks/" \
+  "${STICK}/tracks"

@@ -1,0 +1,124 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'pathname'
+
+ZFS = Pathname.new('/usr/sbin/zfs').freeze
+
+def usage
+  'usage: k8s <stop|start|reboot|status|rollback|snapshot>'
+end
+
+# Methods to bring bhyve k8s zones up and down
+class K8sZones
+  attr_reader :zones
+
+  def initialize
+    @zones = find_zones
+  end
+
+  def start
+    operate(zones, 'boot', 'running')
+  end
+
+  def stop
+    operate(zones, 'shutdown', 'installed')
+  end
+
+  # reboots zones in a random order, one minute apart
+  #
+  def reboot
+    reboot_zones
+  end
+
+  def cycle
+    reboot_zones(60)
+  end
+
+  def status
+    zones.each { |zone, status| puts "  #{zone}  #{status}" }
+  end
+
+  def rollback(snapshot)
+    zones.each_key do |zone|
+      puts "rolling #{zone} back to #{snapshot}"
+      `zfs rollback rpool/bhyve/#{zone}@#{snapshot}`
+    end
+  end
+
+  def snapshot
+    snap_name = Time.now.strftime('%Y-%m-%d-%H:%M:%S')
+    `zfs list -Honame`.split("\n").select { |f| f.include?('k8s') }.each do |fs|
+      puts "Snapshotting #{fs}@#{snap_name}"
+      `zfs snapshot #{fs}@#{snap_name}"`
+    end
+  end
+
+  private
+
+  def operate(zones, command, state)
+    zones.each do |zone, status|
+      print "  #{zone}: "
+
+      if status == state
+        puts "already in state #{state}"
+      else
+        ret = zone_cmd(zone, command)
+        puts ret ? "#{command} complete" : 'FAILED'
+      end
+    end
+  end
+
+  def reboot_zones(interval = false)
+    zones.shuffle.each do |zone, status|
+      print "  #{zone}: "
+
+      sleep(interval) if interval
+
+      if status == 'running'
+        zone_cmd(zone, 'reboot')
+      else
+        puts 'not running'
+      end
+    end
+  end
+
+  # I only use bhyve for the k8s stuff, so any and all bhyve zones are of
+  # interest
+  #
+  def find_zones
+    zones = `zoneadm list -cp`.split("\n").select do |z|
+      z.split(':')[5] == 'bhyve'
+    end
+
+    zones.map { |z| z.split(':')[1..2] }.sort
+  end
+
+  def zone_cmd(zone, cmd)
+    system("/usr/sbin/zoneadm -z #{zone} #{cmd}")
+  end
+end
+
+abort usage unless ARGV.size >= 1
+
+Controller = K8sZones.new
+
+case ARGV.first
+when 'start'
+  Controller.start
+when 'stop'
+  Controller.stop
+when 'reboot'
+  Controller.reboot
+when 'cycle'
+  Controller.cycle
+when 'status'
+  Controller.status
+when 'rollback'
+  abort 'requires snapshot as final argument' unless ARGV[1]
+  Controller.rollback(ARGV[1])
+when 'snapshot'
+  Controller.snapshot
+else
+  abort usage
+end

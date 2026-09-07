@@ -1,0 +1,37 @@
+#!/bin/sh
+
+# Extremely crude theme flipping for my Arch desktop
+
+DOTDIR=${HOME}/github.com/snltd/_DOTFILES
+
+if [[ $1 == "dark" ]]
+then
+	WEZTERM_FROM="light_theme"
+	WEZTERM_TO="dark_theme"
+	HELIX_FROM="solarized_light"
+	HELIX_TO="solarized_dark"
+	GTK_THEME="Boron-dark"
+	GSETTINGS="prefer-dark"
+	LABWC_FROM="Boron-light"
+	LABWC_TO="Boron-dark"
+elif [[ $1 == "light" ]]
+then
+	WEZTERM_FROM="dark_theme"
+	WEZTERM_TO="light_theme"
+	HELIX_FROM="solarized_dark"
+	HELIX_TO="solarized_light"
+	GTK_THEME="Boron-light"
+	GSETTINGS="prefer-light"
+	LABWC_FROM="Boron-dark"
+	LABWC_TO="Boron-light"
+else
+	echo "usage: theme-flip light | dark"
+	exit 1
+fi
+
+sed -i "s/return $WEZTERM_FROM/return $WEZTERM_TO/" ${DOTDIR}/wezterm.lua
+sed -i "s/$HELIX_FROM/$HELIX_TO/" ${DOTDIR}/config-helix/config.toml
+sed -i "s/$LABWC_FROM/$LABWC_TO/" ${DOTDIR}/config-labwc/rc.xml
+labwc --reconfigure
+gsettings set org.gnome.desktop.interface gtk-theme "$GSETTINGS"
+gsettings set org.gnome.desktop.interface color-scheme $GSETTINGS

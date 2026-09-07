@@ -1,0 +1,32 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'pathname'
+require 'json'
+require 'uri'
+
+CREDS_FILE = Pathname.new(Dir.home).join('work',
+                                         '_SECRETS',
+                                         'easyget.json')
+
+creds = JSON.parse(File.read(CREDS_FILE), symbolize_names: true)
+
+abort 'usage: easyget <URL> [filename]' unless ARGV.count.between?(1, 2)
+
+url = ARGV.first
+uri = URI.parse(url)
+
+filename = if ARGV.count == 2
+             ARGV.last
+           else
+             URI.decode_www_form_component(File.basename(uri.path))
+           end
+
+`wget \
+    -q \
+    --progress=bar:noscroll \
+    --show-progress \
+    --user="#{creds[:username]}" \
+    --password="#{creds[:password]}" \
+    -O "#{filename}" \
+    "#{url}"`

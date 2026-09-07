@@ -1,0 +1,42 @@
+#!/bin/ksh
+
+# !!!DESTRUCTIVELY!!! recover a filesystem from an external drive.
+
+PATH=/usr/bin
+
+die()
+{
+  print -u2 $1
+  exit 1
+}
+
+if (( $# < 2 ))
+then
+	die "usage: recover_external <recover-root> <dir>..."
+fi
+
+RECOVER_ROOT=$1
+shift
+
+test -d $RECOVER_ROOT || die "${RECOVER_ROOT} not found"
+
+for dir
+do
+	test -d "$dir" || die "target '${dir}' not found on local filesystem"
+
+	target=$dir
+	src="${RECOVER_ROOT}/$target"
+
+	test -d $src || die "source '${src}' not found on backup media"
+
+	rsync \
+		--archive \
+		--prune-empty-dirs \
+		--delete \
+		--whole-file \
+		--inplace \
+		--progress \
+		--size-only \
+	$src/ \
+	$target/
+done

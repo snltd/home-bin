@@ -1,0 +1,260 @@
+#!/bin/ksh
+
+# Backs up a server to USB drive. Puts everything in a single encrypted ZFS
+# dataset. Under the top-level directory the backed-up filesystems mimic their
+# mountpoints on the server. So /export/flac on serv is under
+# /pool/backup-serv/export/flac
+# To mount for recovery: run with 'mount' as the second arg
+# zpool import pool
+# zfs load-key pool/backup-serv
+# zfs mount pool/backup-serv
+
+PATH=/bin:/usr/sbin
+
+DATASETS="
+	big/archive
+	big/flac
+	big/fonts
+	big/games
+	big/synths
+	big/software
+	big/sysdef
+	big/user_data/klf
+	big/user_data/rob
+	big/video
+	fast/export/home/klf
+	fast/export/home/rob
+	fast/export/home/rob/work
+	fast/mp3
+	fast/photos
+	fast/zone/backup/kronos
+	fast/zone/backup/user
+	fast/zone/build/build
+	fast/zone/mariadb/backup
+	fast/zone/mariadb/data
+  fast/zone/mariadb/backup"
+
+RAW_DATASETS="big/zone/fs/u01"
+
+HI='\033[1;34m'
+HO='\033[0m'
+
+die()
+{
+	print -u2 "ERROR: $1"
+	exit ${2:-1}
+}
+
+usage()
+{
+	print -u2 "usage: ${0##*/} <pool> [mount | unmount]"
+	exit 2
+}
+
+sync_dirs()
+{
+	print "  $1 -> $2"
+	mkdir -p $2
+
+	rsync \
+		--archive \
+		--whole-file \
+		--delete \
+		--delete-excluded \
+		--force \
+		--inplace \
+		--progress \
+		--size-only \
+		--one-file-system \
+		--max-delete=5000 \
+		--exclude .bundle \
+		--exclude .cache \
+		--exclude .cargo \
+		--exclude .ccache \
+		--exclude .gem \
+		--exclude .git \
+		--exclude .m2 \
+		--exclude .yarn \
+		--exclude .zfs \
+		--exclude tmp \
+		--exclude .puppetlabs \
+		--exclude .rbenv \
+		--exclude .rustup \
+		--exclude '.zhist*' \
+		--exclude go/pkg \
+		--exclude target/debug \
+		--exclude target/release \
+		$1/ $2/
+}
+
+# A dataset is backed up into a dataset in the backup pool whose name is the
+# source dataset prefixed with the backup pool name. So 'big/flac' goes in
+# 'pool/big/flac'. The mountpoint of the target dataset is the same as the
+# real dataset but underneath the $BACKUP_ROOT. (We don't use 'zpool import
+# -R' because that's got the potential to trip us up later.)
+#
+backup_dataset()
+{
+	print "${HI}backing up dataset $1${HO}"
+
+	source_ds="$1"
+	source_dir=$(zfs get -Ho value mountpoint $source_ds)
+	target_dir="${BACKUP_ROOT}$source_dir"
+
+	check_dataset $source_ds
+	check_content $source_dir
+
+	sync_dirs $source_dir $target_dir
+}
+
+# ZFS doesn't seem to give you a way of telling which zone owns a zoned
+# dataset, but our naming conventions let us work it out
+#
+backup_zoned_dataset()
+{
+	print "${HI}backing up zoned dataset $1${HO}"
+
+	source_ds="$1"
+	zone_mountpoint_dir=$(zfs get -Ho value mountpoint $source_ds)
+	zone_name="$(uname -n)-$(print $source_ds | \
+							 sed 's|.*/zone/\([^/]*\).*|\1|')"
+	zone_root="/zones/${zone_name}/root"
+	source_dir="${zone_root}${zone_mountpoint_dir}"
+
+	target_dir="${BACKUP_ROOT}$source_dir"
+
+	check_dataset $source_ds
+	check_content $source_dir
+
+	sync_dirs $source_dir $target_dir
+}
+
+backup_raw_datasets()
+{
+	mkdir -p $RAW_DATASET_DIR
+
+	for d in $RAW_DATASETS
+	do
+		if [[ $(zfs get -Ho value mounted $d)  == "yes" ]]
+		then
+			print "${HI}backing up raw dataset $d${HO}"
+			print "Snapshotting ${d}"
+			snap="${d}@raw_backup"
+			zfs snapshot $snap
+			print "Dumping $snap"
+			zfs send -v $snap >${RAW_DATASET_DIR}/$(echo $d | tr / _)
+			zfs destroy $snap
+		else
+			print "${d} not mounted -- not snapshotting"
+		fi
+	done
+}
+
+# Make sure the given dataset is mounted
+#
+check_dataset()
+{
+	[[ $(zfs get -Ho value mounted $1) == "yes" ]] || \
+		die "dataset is not mounted"
+}
+
+# Make sure the given mountpoint contains something
+#
+check_content()
+{
+	(( $(find $1 | sed 2q | wc -l) == 2 )) || \
+		die "dataset has no content"
+}
+
+import_pool()
+{
+	print "  importing..."
+	zpool import $1 >/dev/null 2>&1
+	zpool list $1 >/dev/null 2>&1 || die "cannot import pool"
+}
+
+export_pool()
+{
+	print "Exporting backup pool [$1]..."
+	zpool export $1 >/dev/null 2>&1
+	zpool list $1 >/dev/null 2>&1 && die "failed to export pool"
+	print "  pool is exported, device can be disconnected."
+}
+
+check_pool_health()
+{
+	if [[ $(zpool get -Hpo value health $1) == "ONLINE" ]]
+	then
+		print "  pool is ONLINE"
+	else
+		die "Pool is not in ONLINE state"
+	fi
+}
+
+mount_dataset()
+{
+	print "Mounting encrypted dataset [$1]..."
+	zfs load-key $1 2>/dev/null
+	zfs mount $1
+}
+
+unmount_dataset()
+{
+	print "Unmounting encrypted dataset [$1]..."
+	zfs umount $1
+	zfs unload-key $1
+
+}
+
+# SCRIPT STARTS HERE
+
+[[ $(uname -n) == "serv" ]] || die "not running on serv"
+
+(( $# < 1 || $# > 2 )) && usage
+
+[[ -n $2 && $2 != "mount" && $2 != "unmount" ]]  && usage
+
+BACKUP_POOL=$1
+
+if [[ $BACKUP_POOL != "passport" && $BACKUP_POOL != "seagate" ]]
+then
+	die "pool must be 'passport' or 'seagate'"
+fi
+
+BACKUP_DATASET="${BACKUP_POOL}/backup-$(uname -n)"
+BACKUP_ROOT="/${BACKUP_DATASET}"
+RAW_DATASET_DIR="${BACKUP_ROOT}/raw"
+
+if [[ $2 != "unmount" ]]
+then
+	print "Preparing backup pool [${BACKUP_POOL}]"
+	zpool list $BACKUP_POOL >/dev/null 2>&1 || import_pool $BACKUP_POOL
+	print "  pool is present"
+	check_pool_health $BACKUP_POOL
+	mount_dataset $BACKUP_DATASET
+	check_dataset $BACKUP_DATASET
+fi
+
+if [[ $2 == "mount" ]]
+then
+	print -u2 "Requested mount only. Exiting."
+	exit 0
+fi
+
+if [[ $2 != "unmount" ]]
+then
+	backup_raw_datasets
+
+	for fs in $DATASETS
+	do
+		if [[ $(zfs get -Ho value zoned $fs) == "off" ]]
+		then
+			backup_dataset $fs
+		else
+			backup_zoned_dataset $fs
+		fi
+	done
+fi
+
+unmount_dataset $BACKUP_DATASET
+export_pool $BACKUP_POOL
