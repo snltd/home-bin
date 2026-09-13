@@ -15,7 +15,6 @@ then
 	REMOTE_CRATES="
 		du-dust \
 		fclones
-		tombi \
 		tokei \
 		typos-cli \
 	  dprint \
