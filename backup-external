@@ -76,6 +76,7 @@ sync_dirs()
 		--exclude .m2 \
 		--exclude .yarn \
 		--exclude .zfs \
+		--exclude .local \
 		--exclude tmp \
 		--exclude .puppetlabs \
 		--exclude .rbenv \
