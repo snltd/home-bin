@@ -13,10 +13,10 @@ LOCAL_CRATES="
 if [[ $(uname -s) == "SunOS" ]]
 then
 	REMOTE_CRATES="
+		cargo-nextest \
 		du-dust \
-		fclones
+		fclones \
 		tokei \
-		typos-cli \
 	  dprint \
 	"
 
@@ -48,19 +48,18 @@ do
 	go install $pkg >/dev/null
 done
 
+for crate in $REMOTE_CRATES
+do
+	print "INSTALLING REMOTE_CRATE: $crate"
+	cargo install -q --locked "$crate"
+done
+
 for git_crate in $GIT_CRATES
 do
 	url=${git_crate#*=}
 	crate=${git_crate%=*}
 	print "INSTALLING GIT CRATE: $crate FROM $url"
-	cargo install --git $url --locked $crate
-done
-
-
-for crate in $REMOTE_CRATES
-do
-	print "INSTALLING REMOTE_CRATE: $crate"
-	cargo install -q "$crate"
+	cargo install -q --git $url --locked $crate
 done
 
 for crate in $LOCAL_CRATES
